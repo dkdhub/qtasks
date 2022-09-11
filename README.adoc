@@ -1,0 +1,159 @@
+= qtasks
+
+A Simple Clojure wrapper around http://www.quartz-scheduler.org/[Quartz Scheduler].
+
+== Rationale
+
+There are a few Clojure libraries for working with Quartz, but each one has a fatal flaws or limited by their poor implementation (like `Quartzite` or `scheduling`).
+
+== Features
+
+* No global state
+* You can pass any instance-aware context to jobs
+* Data structure-centric API
+* Jobs are usual vars with function
+* Stateful jobs
+* No magic
+* `component` support out of the box
+* Quartz' Listeners support via core.async channels
+
+== Usage
+
+Basic config (see https://www.quartz-scheduler.org/documentation/quartz-2.3.0/configuration/[Quartz Configuration Reference]):
+[source,clojure]
+
+----
+(require '[qtasks.core :as qtasks])
+
+(def props {:threadPool.class "org.quartz.simpl.SimpleThreadPool"
+ :threadPool.threadCount 1
+ :plugin.triggHistory.class "org.quartz.plugins.history.LoggingTriggerHistoryPlugin"
+ :plugin.jobHistory.class "org.quartz.plugins.history.LoggingJobHistoryPlugin"})
+
+;; Scheduler supports component/Lifecycle protocol and clojure.lang.Associative
+;; (its Clojure record), so you can simply drop it into your system map.
+;; Or use some other DI system.
+
+(def sched (-> (qtasks/make-scheduler props) (qtasks/start)))
+----
+
+.defjob macro
+`defjob` macro defines two functions, in this case `test-job` and `test-job*`. `test-job*` is an actual job with the body provided by you.
+It executes in Quartz' thread pool.
+Generated `test-job` is a helper function that can be used for scheduling jobs.
+
+Job function accepts scheduler instance as the first argument, and the rest of the arguments are passed on to job scheduling.
+
+[source,clojure]
+----
+
+(qtasks/defjob test-job
+ [scheduler name message]
+ (prn "Message for:" name message))
+----
+
+Well, let's run it!
+
+[source,clojure]
+----
+;; If you use cider, note that Quartz threads know nothing about repl's stdout.
+;; So keep your eye on messages in nrepl-server buffer
+
+(test-job sched ["Yo!" "Hello world"])
+----
+
+That's all.
+The first argument is a scheduler instance; the second one is a vector of arguments, and optional tail arguments are options for `schedule-job` function (job and trigger params actually – see https://www.quartz-scheduler.org/documentation/[Quartz documentation] for details).
+
+You can schedule execution of any defn without a helper:
+
+[source,clojure]
+----
+(defn test-job2
+  [scheduler name message]
+  (prn "Message  from:" name message))
+
+(qtasks/schedule-job sched #'test-job2 ["Petru" "Hi, world!"])
+----
+
+Define simple or cron trigger via map:
+
+[source,clojure]
+----
+(test-job sched ["Petru" "Hello world"]
+          :trigger {:simple {:repeat 5 :interval 1000}})
+
+(test-job sched ["Petru" "Hello world"]
+          :job      {:identity "eternal job"}
+          :trigger  {:cron "*/10 * * * * ?"})
+
+(qtasks/delete-job sched "eternal job")
+----
+
+=== Persistent JobStore
+
+Configure Quartz for your store.
+You should also pick a well-defined name for your scheduler:
+
+[source,clojure]
+----
+(def persistent-props
+  (assoc props
+    :jobStore.class "org.quartz.impl.jdbcjobstore.JobStoreTX"
+    :jobStore.driverDelegateClass "org.quartz.impl.jdbcjobstore.PostgreSQLDelegate"
+    :jobStore.tablePrefix "QRTZ_"
+    :jobStore.dataSource "db"
+    :dataSource.db.driver "org.postgresql.Driver"
+    :dataSource.db.URL "jdbc:postgresql://localhost:5432/db_name"
+    :dataSource.db.user "user"
+    :dataSource.db.password "pass"))
+
+(def persistent-sched (-> (qtasks/make-scheduler persistent-props {:name "main-sched"})
+                          (qtasks/start)))
+----
+
+In this example we can also see how to configure a job and a trigger.
+With the `:state` param provided, a job becomes a Stateful job, and the job function accepts state as the second argument and should return updated state.
+
+[source,clojure]
+----
+(qtasks/defjob test-statefull-job
+  [scheduler state i]
+  (prn "The state:" state)
+  (update-in state [:counter] + i))
+
+(test-statefull-job persistent-sched [4]
+                    :job {:state {:counter 1}}
+                    :trigger {:simple {:repeat :inf :interval 1000}})
+
+----
+
+And now stop and start a new scheduler without scheduling a task.
+Our previously scheduled task will continue executing.
+
+[source,clojure]
+----
+(qtasks/stop persistent-sched)
+(def persistent-sched2 (-> (qtasks/make-scheduler persistent-props {:name "main-sched"})
+                           (qtasks/start)))
+----
+
+=== Listeners
+
+You can define listeners of some events with core.async channels.
+
+[source,clojure]
+----
+(require '[clojure.core.async :as a])
+(def executed (qtasks/add-listener persistent-sched2 {:everything true} :was-executed))
+
+(loop []
+  (prn "-- EXECUTED!" (->  (a/<!! executed) .getJobDetail .getJobDataMap (get "state")))
+  (recur))
+----
+
+== License
+
+Copyright © 2018-2022 Fern Flower Lab LP
+
+Distributed under the MIT License for OSS projects, and DKD/DKDHUB Basic Proprietary License for any of commercial use.
