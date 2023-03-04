@@ -6,4 +6,4 @@
                  [org.quartz-scheduler/quartz-jobs "2.3.2"]
                  [com.stuartsierra/component "1.1.0"]
                  [prismatic/plumbing "0.6.0"]
-                 [org.clojure/core.async "1.5.648"]])
+                 [org.clojure/core.async "1.6.673"]])
