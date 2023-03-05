@@ -1,16 +1,16 @@
 (ns qtasks.core
-  (:require [com.stuartsierra.component :as component]
-            [plumbing.core :refer :all]
+  (:require [plumbing.core :refer :all]
             [clojure.core.async :as a]
             [qtasks.impl.core :as impl])
-  (:import [org.quartz.impl StdSchedulerFactory]
-           [org.quartz.impl.matchers OrMatcher NotMatcher NameMatcher KeyMatcher
+  (:import (java.util Properties)
+           (org.quartz.impl SchedulerRepository StdSchedulerFactory)
+           (org.quartz.impl.matchers OrMatcher NotMatcher NameMatcher KeyMatcher
                                      AndMatcher GroupMatcher
-                                     EverythingMatcher]
-           [org.quartz.utils Key]
-           [org.quartz JobBuilder JobDataMap TriggerBuilder
-                       SimpleScheduleBuilder CronScheduleBuilder JobListener JobKey TriggerKey]
-           [qtasks QtasksJob QtasksStatefullJob]))
+                                     EverythingMatcher)
+           (org.quartz.utils Key)
+           (org.quartz JobBuilder JobDataMap SchedulerException TriggerBuilder
+                       SimpleScheduleBuilder CronScheduleBuilder JobListener JobKey TriggerKey)
+           (qtasks QtasksJob QtasksStatefullJob)))
 
 
 (defn make-job
@@ -94,7 +94,7 @@
   (-> (TriggerBuilder/newTrigger)
       (cond->
         group (.withIdentity identity group)
-        (not group) (.withIdentity identity)
+        (not group) (.withIdentity ^String identity)
         for-job (.forJob for-job)
         start-at (.startAt start-at)
         end-at (.endAt end-at)
@@ -156,13 +156,17 @@
            [scheduler# args# & params#]
            (apply schedule-job scheduler# (var ~generated-f) args# params#)))))
 
-(defn start
-  [scheduler]
-  (component/start scheduler))
+(defrecord Scheduler [])
 
-(defn stop
-  [scheduler]
-  (component/stop scheduler))
+(defn start [^Scheduler scheduler]
+  (.setJobFactory (:qtasks/quartz scheduler) (impl/make-job-factory scheduler))
+  (.start (:qtasks/quartz scheduler))
+  scheduler)
+
+(defn stop [^Scheduler scheduler]
+  (.shutdown (:qtasks/quartz scheduler) true)
+  (-> (SchedulerRepository/getInstance) (.remove (:qtasks/name scheduler)))
+  scheduler)
 
 (defn make-scheduler
   ([] (make-scheduler {}))
@@ -170,6 +174,7 @@
   ([properties options]
    (let [n (get options :name (impl/uuid))
          factory (StdSchedulerFactory.
+                   ^Properties
                    (->> (assoc properties
                           :scheduler.instanceName n)
                         (map-keys #(str "org.quartz." (name %)))
@@ -178,9 +183,9 @@
      (when-let [cals (:calendars options)]
        (doseq [[name cal replace update-triggers] cals]
          (.addCalendar quartz name cal (boolean replace) (boolean update-triggers))))
-     (impl/map->Scheduler {:qtasks/quartz    quartz
-                           :qtasks/name      n
-                           :qtasks/listeners (atom {})}))))
+     (map->Scheduler {:qtasks/quartz    quartz
+                      :qtasks/name      n
+                      :qtasks/listeners (atom {})}))))
 
 ;; TODO should be extendable
 (defn matcher
@@ -259,12 +264,16 @@
                         (when (= :was-executed listener-type)
                           (a/>!! ch context)))))
          built-matcher (matcher matcher-spec listener-scope)]
-     (-> (:qtasks/quartz scheduler)
-         (.getListenerManager)
-         (.addJobListener listener built-matcher))
-     (swap! (:qtasks/listeners scheduler)
-            assoc ch {:listener-name n :listener-type listener-type})
-     ch)))
+
+     (try (do
+            (-> (:qtasks/quartz scheduler)
+                (.getListenerManager)
+                (.addJobListener listener built-matcher))
+            (swap! (:qtasks/listeners scheduler)
+                   assoc ch {:listener-name n :listener-type listener-type})
+            ch)
+          (catch NullPointerException _ nil)
+          (catch SchedulerException _ nil)))))
 
 (defn remove-listener
   [scheduler listener]
@@ -273,5 +282,6 @@
         meta (-> scheduler :qtasks/listeners deref (get listener))]
     (case (:listener-type meta)
       (:execution-vetoed :to-be-executed :was-executed)
-      (.removeJobListener m (:listener-name meta)))
+      (.removeJobListener m (:listener-name meta))
+      false)
     (swap! (:qtasks/listeners scheduler) dissoc listener)))

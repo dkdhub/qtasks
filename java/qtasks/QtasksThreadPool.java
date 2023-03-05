@@ -48,8 +48,6 @@ public class QtasksThreadPool implements ThreadPool {
 
     private boolean inheritGroup = true;
 
-    private boolean makeThreadsDaemons = false;
-
     private ThreadGroup threadGroup;
 
     private final Object nextRunnableLock = new Object();
@@ -191,22 +189,6 @@ public class QtasksThreadPool implements ThreadPool {
         this.inheritGroup = inheritGroup;
     }
 
-
-    /**
-     * @return Returns the value of makeThreadsDaemons.
-     */
-    public boolean isMakeThreadsDaemons() {
-        return makeThreadsDaemons;
-    }
-
-    /**
-     * @param makeThreadsDaemons
-     *          The value of makeThreadsDaemons to set.
-     */
-    public void setMakeThreadsDaemons(boolean makeThreadsDaemons) {
-        this.makeThreadsDaemons = makeThreadsDaemons;
-    }
-
     public void setInstanceId(String schedInstId) {
     }
 
@@ -239,9 +221,6 @@ public class QtasksThreadPool implements ThreadPool {
                 parent = threadGroup.getParent();
             }
             threadGroup = new ThreadGroup(parent, schedulerInstanceName + "-QtasksThreadPool");
-            if (isMakeThreadsDaemons()) {
-                threadGroup.setDaemon(true);
-            }
         }
 
 
@@ -267,8 +246,7 @@ public class QtasksThreadPool implements ThreadPool {
             }
             WorkerThread wt = new WorkerThread(this, threadGroup,
                     threadPrefix + "-" + i,
-                    getThreadPriority(),
-                    isMakeThreadsDaemons());
+                    getThreadPriority());
             if (isThreadsInheritContextClassLoaderOfInitializingThread()) {
                 wt.setContextClassLoader(Thread.currentThread()
                         .getContextClassLoader());
@@ -409,7 +387,7 @@ public class QtasksThreadPool implements ThreadPool {
                 // If the thread pool is going down, execute the Runnable
                 // within a new additional worker thread (no thread from the pool).
                 WorkerThread wt = new WorkerThread(this, threadGroup,
-                        "WorkerThread-LastJob", prio, isMakeThreadsDaemons(), runnable);
+                        "WorkerThread-LastJob", prio, runnable);
                 busyWorkers.add(wt);
                 workers.add(wt);
                 wt.start();
@@ -486,9 +464,9 @@ public class QtasksThreadPool implements ThreadPool {
          * </p>
          */
         WorkerThread(QtasksThreadPool tp, ThreadGroup threadGroup, String name,
-                     int prio, boolean isDaemon) {
+                     int prio) {
 
-            this(tp, threadGroup, name, prio, isDaemon, null);
+            this(tp, threadGroup, name, prio, null);
         }
 
         /**
@@ -498,7 +476,7 @@ public class QtasksThreadPool implements ThreadPool {
          * </p>
          */
         WorkerThread(QtasksThreadPool tp, ThreadGroup threadGroup, String name,
-                     int prio, boolean isDaemon, Runnable runnable) {
+                     int prio, Runnable runnable) {
 
             super(threadGroup, name);
             this.tp = tp;
@@ -506,7 +484,6 @@ public class QtasksThreadPool implements ThreadPool {
             if(runnable != null)
                 runOnce = true;
             setPriority(prio);
-            setDaemon(isDaemon);
         }
 
         /**
