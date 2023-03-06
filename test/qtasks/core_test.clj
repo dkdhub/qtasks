@@ -7,7 +7,7 @@
                [scheduler first-name last-name]
                nil)
 
-(qtasks/defjob statefull-job
+(qtasks/defjob stateful-job
                [scheduler state]
                (str state "(.)"))
 
@@ -31,13 +31,13 @@
         (is (= ["Petru" "Yanovicy"] (get data-map "arguments")))
         (is (= nil (get data-map "state"))))))
 
-  (testing "Statefull job"
+  (testing "Stateful job"
     (let [listener (qtasks/add-listener *scheduler*
                                         {:key ["test-suite" "task-2"]} :was-executed)]
-      (statefull-job *scheduler* []
-                     :job {:identity "task-2"
-                           :group    "test-suite"
-                           :state    "(.)(.)"})
+      (stateful-job *scheduler* []
+                    :job {:identity "task-2"
+                          :group    "test-suite"
+                          :state    "(.)(.)"})
 
       (let [res (async-res listener)
             data-map (-> (.getJobDetail res) (.getJobDataMap))]

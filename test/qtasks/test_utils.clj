@@ -1,14 +1,13 @@
 (ns qtasks.test-utils
   (:require [qtasks.core :as qtasks]
-            [clojure.core.async :as async])
-  (:import [org.quartz JobKey]))
+            [clojure.core.async :as async]))
 
 
 (defn async-res
   ([ch] (async-res ch 5))
   ([ch seconds]
      (async/alt!!
-       (async/timeout (* seconds 5000)) (throw (Exception. "Timeout"))
+       (async/timeout (* seconds 1000)) (throw (Exception. "Timeout"))
        ch ([v ch] v))))
 
 (def ^:dynamic *scheduler*)
